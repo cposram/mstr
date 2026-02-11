@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MSTR 雲端策略導航儀</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        .glow-green { color: #10b981; text-shadow: 0 0 20px rgba(16, 185, 129, 0.6); }
+        .glow-red { color: #ef4444; text-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+        .glow-yellow { color: #fbbf24; text-shadow: 0 0 20px rgba(251, 191, 36, 0.6); }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .input-focus:focus { border-color: #f97316; box-shadow: 0 0 10px rgba(249, 115, 22, 0.2); }
+    </style>
+</head>
+<body class="bg-[#0b0e11] text-gray-200 font-sans min-h-screen">
+
+    <div class="container mx-auto px-4 py-6 max-w-6xl">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-6 border-b border-gray-800 pb-4 gap-4">
+            <div class="text-center md:text-left">
+                <h1 class="text-3xl font-black text-orange-500 italic tracking-tighter">MSTR STRATEGY PRO <span class="text-xs bg-orange-900 text-orange-200 px-2 py-0.5 rounded ml-2">CLOUD</span></h1>
+                <p class="text-[10px] text-gray-500 uppercase tracking-[0.2em]">Synchronized with Firebase Realtime DB</p>
+            </div>
+            <div id="action-advice" class="text-xl font-bold px-6 py-2 rounded-full border-2 border-dashed border-gray-700 transition-all duration-500">
+                連線中...
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-[#161a1e] p-4 rounded-xl border border-gray-800">
+                <label class="block text-[10px] text-gray-500 mb-1 font-bold tracking-widest">BTC PRICE (USD)</label>
+                <input type="number" id="price-btc" class="bg-transparent text-2xl font-bold text-yellow-500 w-full outline-none input-focus transition-all" placeholder="0.00">
+            </div>
+            <div class="bg-[#161a1e] p-4 rounded-xl border border-gray-800">
+                <label class="block text-[10px] text-gray-500 mb-1 font-bold tracking-widest">MSTR PRICE (USD)</label>
+                <input type="number" id="price-mstr" class="bg-transparent text-2xl font-bold text-blue-400 w-full outline-none input-focus transition-all" placeholder="0.00" step="0.01">
+            </div>
+            <div class="bg-[#161a1e] p-4 rounded-xl border border-gray-800">
+                <label class="block text-[10px] text-gray-500 mb-1 font-bold tracking-widest">INTRINSIC NAV</label>
+                <div id="result-nav" class="text-2xl font-bold text-gray-400">---</div>
+            </div>
+            <div class="bg-[#1e2329] p-4 rounded-xl border-2 border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.15)]">
+                <label class="block text-[10px] text-orange-500 mb-1 font-bold">PREMIUM (溢價率)</label>
+                <div id="result-premium" class="text-4xl font-black">---</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div class="lg:col-span-1 space-y-4">
+                <div class="bg-[#161a1e] p-5 rounded-xl border border-gray-800 shadow-inner">
+                    <h3 class="text-sm font-bold mb-4 flex items-center"><span class="w-1 h-4 bg-orange-500 mr-2"></span> 雲端參數設定</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[10px] text-gray-500 mb-1">MSTR 總持倉 (BTC)</label>
+                            <input type="number" id="param-holdings" class="bg-black/40 border border-gray-700 rounded px-3 py-2 w-full text-orange-400 outline-none focus:border-orange-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-gray-500 mb-1">總股本 (Total Shares)</label>
+                            <input type="number" id="param-shares" class="bg-black/40 border border-gray-700 rounded px-3 py-2 w-full text-blue-400 outline-none focus:border-blue-400">
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="syncToCloud()" class="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded transition-all font-bold shadow-lg shadow-orange-900/20">更新至雲端</button>
+                            <button onclick="fetchInitialBTC()" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded text-xs transition text-gray-400">重抓 BTC</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#161a1e] p-5 rounded-xl border border-gray-800">
+                    <h3 class="text-sm font-bold mb-3 flex items-center"><span class="w-1 h-4 bg-green-500 mr-2"></span> 波段策略參考</h3>
+                    <div class="text-[11px] space-y-2.5">
+                        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                            <span class="text-green-500 font-medium">P < 1.15x</span>
+                            <span class="bg-green-900/30 text-green-400 px-2 py-0.5 rounded font-bold">STRONG BUY</span>
+                        </div>
+                        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                            <span class="text-green-400/80">1.15x - 1.45x</span>
+                            <span class="text-gray-300">建倉 / 持有</span>
+                        </div>
+                        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                            <span class="text-gray-500">1.45x - 1.90x</span>
+                            <span class="text-gray-500">合理區間</span>
+                        </div>
+                        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                            <span class="text-yellow-500">1.90x - 2.40x</span>
+                            <span class="bg-yellow-900/30 text-yellow-400 px-2 py-0.5 rounded font-bold">減碼 TA</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-red-500">P > 2.50x</span>
+                            <span class="bg-red-900/30 text-red-400 px-2 py-0.5 rounded font-bold">STRONG SELL</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 bg-[#161a1e] rounded-xl overflow-hidden border border-gray-800 min-h-[500px]">
+                <div id="tv-chart" class="h-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =========================================================================
+        // Firebase 配置 (由用戶提供)
+        // =========================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyBQr_3o913vgaWUg4PAuequLEVE1mZFS7M",
+            authDomain: "cowgame-48dd8.firebaseapp.com",
+            databaseURL: "https://cowgame-48dd8-default-rtdb.firebaseio.com",
+            projectId: "cowgame-48dd8",
+            storageBucket: "cowgame-48dd8.firebasestorage.app",
+            messagingSenderId: "957972615393",
+            appId: "1:957972615393:web:14fd2ebb956a6c48ade7a0",
+            measurementId: "G-M11PJ7Z2T7"
+        };
+
+        // 初始化 Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const configRef = db.ref('mstr_radar_config');
+
+        // =========================================================================
+        // 核心邏輯
+        // =========================================================================
+        
+        // 監聽雲端數據變動
+        configRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                if (data.holdings) $('#param-holdings').val(data.holdings);
+                if (data.shares) $('#param-shares').val(data.shares);
+                if (data.last_btc && !$('#price-btc').val()) $('#price-btc').val(data.last_btc);
+                if (data.last_mstr && !$('#price-mstr').val()) $('#price-mstr').val(data.last_mstr);
+                calculate();
+                console.log("雲端數據已同步");
+            }
+        });
+
+        function syncToCloud() {
+            const payload = {
+                holdings: parseFloat($('#param-holdings').val()),
+                shares: parseFloat($('#param-shares').val()),
+                last_btc: parseFloat($('#price-btc').val()),
+                last_mstr: parseFloat($('#price-mstr').val()),
+                updated_at: firebase.database.ServerValue.TIMESTAMP
+            };
+            configRef.set(payload).then(() => {
+                alert("雲端同步成功！");
+            });
+        }
+
+        function calculate() {
+            const btc = parseFloat($('#price-btc').val()) || 0;
+            const mstr = parseFloat($('#price-mstr').val()) || 0;
+            const holdings = parseFloat($('#param-holdings').val()) || 0;
+            const shares = parseFloat($('#param-shares').val()) || 0;
+
+            if (btc > 0 && shares > 0) {
+                const nav = (btc * holdings) / shares;
+                const premium = mstr / nav;
+
+                $('#result-nav').text(`$${nav.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+                $('#result-premium').text(`${premium.toFixed(2)}x`);
+
+                const adviceBox = $('#action-advice');
+                const premiumText = $('#result-premium');
+
+                // 最頂波段策略邏輯
+                if (premium < 1.15) {
+                    adviceBox.text('STRONG BUY 💎').css({'color':'#10b981', 'border-color':'#10b981', 'background':'rgba(16,185,129,0.1)'});
+                    premiumText.addClass('glow-green').removeClass('glow-red glow-yellow text-gray-400');
+                } else if (premium < 1.45) {
+                    adviceBox.text('ACCUMULATE 📈').css({'color':'#34d399', 'border-color':'#34d399', 'background':'transparent'});
+                    premiumText.addClass('glow-green').removeClass('glow-red glow-yellow text-gray-400');
+                } else if (premium < 1.9) {
+                    adviceBox.text('HOLDING 🧘').css({'color':'#9ca3af', 'border-color':'#4b5563', 'background':'transparent'});
+                    premiumText.removeClass('glow-green glow-red glow-yellow').addClass('text-gray-400');
+                } else if (premium < 2.4) {
+                    adviceBox.text('TAKE PROFIT 💰').css({'color':'#fbbf24', 'border-color':'#fbbf24', 'background':'rgba(251,191,36,0.1)'});
+                    premiumText.addClass('glow-yellow').removeClass('glow-green glow-red text-gray-400');
+                } else {
+                    adviceBox.text('STRONG SELL 🔥').css({'color':'#ef4444', 'border-color':'#ef4444', 'background':'rgba(239,68,68,0.1)'});
+                    premiumText.addClass('glow-red').removeClass('glow-green glow-yellow text-gray-400');
+                }
+            }
+        }
+
+        async function fetchInitialBTC() {
+            try {
+                const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+                const data = await res.json();
+                if (data.bitcoin.usd) {
+                    $('#price-btc').val(data.bitcoin.usd);
+                    calculate();
+                }
+            } catch (e) { console.log("BTC API 抓取失敗"); }
+        }
+
+        // TradingView Widget Script 加載後初始化
+        const script = document.createElement('script');
+        script.src = "https://s3.tradingview.com/tv.js";
+        script.onload = () => {
+            new TradingView.widget({
+                "autosize": true,
+                "symbol": "NASDAQ:MSTR",
+                "interval": "D",
+                "theme": "dark",
+                "container_id": "tv-chart",
+                "locale": "zh_TW",
+                "style": "1",
+                "enable_publishing": false,
+                "allow_symbol_change": true,
+                "calendar": false
+            });
+        };
+        document.head.appendChild(script);
+
+        // 監聽輸入框
+        $('input').on('input', calculate);
+
+        // 初始執行
+        fetchInitialBTC();
+    </script>
+</body>
+</html>
